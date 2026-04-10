@@ -356,3 +356,29 @@ Because this skill works incrementally (one section per call), errors are natura
 - **Validate visually after each section.** Use `export_shape` to catch issues early, including at section level not just full-page.
 - **Match existing conventions.** If the file already has screens, match their naming, sizing, and layout patterns.
 - **Use `penpot_api_info` when unsure.** The Plugin API evolves — verify method signatures before coding rather than guessing.
+
+---
+
+## Supporting Files
+
+Read these before or during execution. They contain detailed patterns and code examples.
+
+### References
+
+| File | Read when |
+|------|----------|
+| `references/01-discovery-phase.md` | Before Step 2 — component search strategy, mapping code→Penpot, shared library inspection |
+| `references/02-component-assembly.md` | Before Step 3/4 — wrapper-first pattern, instance creation, text overrides, manual vs. import decision |
+| `references/03-token-binding.md` | During section building — fillColorRefId, typography binding, spacing from tokens, binding gaps |
+| `references/04-error-recovery.md` | On any error — partial cleanup, missing components, wrapper lost, update patterns |
+
+### Scripts (paste into execute_code calls)
+
+| Script | Use for |
+|--------|---------|
+| `scripts/inspectDesignSystem.js` | Step 2 — discover all components, colors, typographies, tokens; quick search; existing screen inventory |
+| `scripts/createScreenWrapper.js` | Step 3 — create page wrapper frame with flex layout and position it correctly |
+| `scripts/buildSection.js` | Step 4 — template for building one section (NavBar example); customize per section type |
+| `scripts/validateScreen.js` | Step 5 — check for empty sections, hardcoded fills, placeholder text, orphaned frames |
+
+> Scripts are templates — replace `REPLACE_WITH_WRAPPER_ID` and other placeholders before running. Each section needs its own customized copy of `buildSection.js`.

@@ -520,3 +520,36 @@ return target ? { id: target.id, name: target.name } : { found: false };
 | https://github.com/penpot/penpot-plugins-samples | Plugin code examples and patterns |
 
 **Before using any API method not shown in this skill**, call `penpot_api_info` to verify the exact signature. The Plugin API evolves rapidly — never assume from memory.
+
+---
+
+## 14. Supporting Files
+
+Read these before or during each phase. They contain detailed patterns, API examples, and anti-patterns that are too long to fit in this skill.
+
+### References (deep-dive guides per phase)
+
+| File | Read during |
+|------|------------|
+| `references/01-discovery-phase.md` | Phase 0 — codebase analysis, Penpot inspection, mapping table, scope lock |
+| `references/02-token-creation.md` | Phase 1 — token set architecture, TokenCatalog API, expression syntax, library colors/typographies |
+| `references/03-component-creation.md` | Phase 3 — dependency ordering, VariantContainer, variant matrix, token binding |
+| `references/04-documentation-creation.md` | Phase 2 — cover page, foundations swatches, type specimens, component doc frames |
+| `references/05-naming-conventions.md` | All phases — dot-notation tokens, slash-notation colors, PascalCase components, Property=Value variants |
+| `references/06-error-recovery.md` | On any error — recovery protocol, sharedPluginData tagging, state ledger, cleanup patterns |
+
+### Scripts (paste into execute_code calls)
+
+| Script | Use for |
+|--------|---------|
+| `scripts/inspectFileStructure.js` | Phase 0 — read-only file inventory (pages, tokens, components, colors, typographies) |
+| `scripts/createTokenSet.js` | Phase 1a — create primitive tokens (color, spacing, radius) idempotently |
+| `scripts/createSemanticTokens.js` | Phase 1b — create semantic tokens with `{expression}` aliases |
+| `scripts/createLibraryColors.js` | Phase 1c/d — create library colors and library typographies |
+| `scripts/createComponentWithVariants.js` | Phase 3 — build VariantContainer with full variant grid |
+| `scripts/createDocumentationPage.js` | Phase 2 + Phase 3 — cover page, foundations sections, component `_Doc` frames |
+| `scripts/validateCreation.js` | End of each phase — verify tokens, colors, typographies, shapes exist as expected |
+| `scripts/rehydrateState.js` | Session resume — reconstruct `{key → id}` map from current file state |
+| `scripts/cleanupOrphans.js` | After errors — safely remove shapes tagged with a run_id (dry run first) |
+
+> Scripts are templates — always replace `REPLACE-ME` placeholders (RUN_ID, component names, etc.) before running.
