@@ -26,6 +26,19 @@ Builds or updates full-page screens in Penpot by reusing the published design sy
 4. Builds each section incrementally, one `execute_code` call at a time
 5. Validates visually with `export_shape` after each section
 
+### `penpot-create-ui`
+
+Designs production-grade UI interfaces from scratch, acting as a **senior visual designer**. Takes a brief or concept and produces polished Penpot screens with a coherent design language, component system, and self-evaluated quality. Targets the aesthetic bar of Stripe, Linear, Vercel, and Raycast — not generic templates.
+
+**Four style profiles**: PRECISION (B2B SaaS/tools), BOLD (marketing/editorial), DARK (dev tools/pro apps), WARM (consumer/community).
+
+**Workflow phases:**
+1. **Design Brief** — decodes brief, selects style profile, writes a Design Direction Card for approval
+2. **Design System Setup** — creates curated tokens, library colors, and typographies for the chosen profile
+3. **Component Creation** — builds Button, Input, Badge, Tag and any screen-specific components
+4. **Screen Assembly** — builds sections top-down using component instances and grid discipline
+5. **Design Critique** — self-evaluates against 6 quality criteria (3-second hierarchy test, product vs. template, spacing consistency, typography system, color intentionality, component consistency) — iterates until score ≥ 10/12
+
 ### `penpot-infer-tokens`
 
 Extracts all hardcoded visual values from an existing Penpot design (colors, spacing, border radii, typography) and creates a W3C-compliant token system with two sets: **global** (primitive raw values) and **semantic** (aliases applied to shapes). Then binds the semantic tokens back to every element.
@@ -113,6 +126,21 @@ penpot-generate-design/
     ├── createScreenWrapper.js
     ├── buildSection.js
     └── validateScreen.js
+
+penpot-create-ui/
+├── SKILL.md
+├── references/
+│   ├── 01-design-brief-analysis.md
+│   ├── 02-design-system-values.md
+│   ├── 03-layout-and-composition.md
+│   ├── 04-component-recipes.md
+│   ├── 05-design-critique-framework.md
+│   └── 06-error-recovery.md
+└── scripts/
+    ├── setupDesignSystem.js
+    ├── createCoreComponents.js
+    ├── buildSection.js
+    └── auditDesignQuality.js
 
 penpot-infer-tokens/
 ├── SKILL.md
