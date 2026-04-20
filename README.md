@@ -1,4 +1,4 @@
-# Penpot Skills for Claude Code
+# Penpot Skills
 
 A set of Claude Code skills that use the [Penpot MCP server](https://github.com/penpot/penpot/tree/develop/mcp) to build and update designs directly from code.
 
