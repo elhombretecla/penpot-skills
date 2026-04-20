@@ -26,6 +26,39 @@ Builds or updates full-page screens in Penpot by reusing the published design sy
 4. Builds each section incrementally, one `execute_code` call at a time
 5. Validates visually with `export_shape` after each section
 
+### `penpot-infer-tokens`
+
+Extracts all hardcoded visual values from an existing Penpot design (colors, spacing, border radii, typography) and creates a W3C-compliant token system with two sets: **global** (primitive raw values) and **semantic** (aliases applied to shapes). Then binds the semantic tokens back to every element.
+
+**Workflow phases:**
+1. **Inspection** — traverses all shapes and collects unique fills, radii, spacings, and fonts
+2. **Inference** — clusters values, proposes token taxonomy with naming (user must approve)
+3. **Creation** — creates global tokens first, then semantic tokens with `{expression}` references
+4. **Application** — binds semantic tokens to shapes via `fillColorRefId`
+
+### `penpot-rename-layers`
+
+Analyzes an existing Penpot design and renames layers using HTML semantic element naming conventions (`header`, `nav`, `main`, `section`, `article`, `button`, `input`, `h1`–`h6`, `p`, `img`, etc.). Infers each layer's role from its visual properties, position, size, and children — then presents a full before/after rename plan for approval before applying.
+
+**Workflow phases:**
+1. **Inspection** — collects full layer inventory with position, size, type, and text properties
+2. **Inference** — applies semantic rules, flags ambiguous cases for user input
+3. **Renaming** — applies approved rename map top-down, validates with screenshots
+
+### `penpot-audit-accessibility`
+
+Audits a Penpot design against WCAG 2.1/2.2 standards and produces a structured report with severity-classified findings (Critical / Major / Minor / Pass).
+
+**Checks performed:**
+- **WCAG 1.4.3** Color contrast (AA: 4.5:1 normal text, 3:1 large text)
+- **WCAG 1.4.11** UI component contrast (3:1)
+- **WCAG 2.5.5/2.5.8** Touch target sizing (44×44px / 24×24px)
+- **WCAG 1.4.4/1.4.12** Text legibility and spacing (line-height, letter-spacing)
+- **WCAG 1.3.1/2.4.6** Heading hierarchy (no skipped levels, single h1)
+- **WCAG 2.4.7/2.4.11** Focus state indicators on interactive components
+- **WCAG 1.1.1** Alt text on images
+- **WCAG 1.4.1** Color-only status indicators
+
 ## Prerequisites
 
 - Claude Code with access to the Penpot MCP server
@@ -34,7 +67,7 @@ Builds or updates full-page screens in Penpot by reusing the published design sy
 
 ## How it Works
 
-Both skills orchestrate multi-step workflows over the Penpot MCP `execute_code` tool, which runs arbitrary TypeScript/JavaScript inside the Penpot Plugin API environment. Every design mutation is sequential and validated before the next step begins.
+All skills orchestrate multi-step workflows over the Penpot MCP `execute_code` tool, which runs arbitrary TypeScript/JavaScript inside the Penpot Plugin API environment. Every design mutation is sequential and validated before the next step begins.
 
 ```
 Claude Code → Penpot MCP (execute_code) → Penpot Plugin API → Penpot file
@@ -80,6 +113,41 @@ penpot-generate-design/
     ├── createScreenWrapper.js
     ├── buildSection.js
     └── validateScreen.js
+
+penpot-infer-tokens/
+├── SKILL.md
+├── references/
+│   ├── 01-inspection-phase.md
+│   ├── 02-token-inference.md
+│   ├── 03-token-application.md
+│   └── 04-error-recovery.md
+└── scripts/
+    ├── inspectDesignValues.js
+    ├── createInferredTokens.js
+    └── applyTokensToShapes.js
+
+penpot-rename-layers/
+├── SKILL.md
+├── references/
+│   ├── 01-inspection-phase.md
+│   ├── 02-semantic-inference.md
+│   └── 03-renaming-strategy.md
+└── scripts/
+    ├── inspectLayerStructure.js
+    └── renameLayer.js
+
+penpot-audit-accessibility/
+├── SKILL.md
+├── references/
+│   ├── 01-inspection-phase.md
+│   ├── 02-contrast-checks.md
+│   ├── 03-sizing-checks.md
+│   └── 04-report-generation.md
+└── scripts/
+    ├── collectAccessibilityData.js
+    ├── checkColorContrast.js
+    ├── checkTouchTargets.js
+    └── generateReport.js
 ```
 
 ## References
