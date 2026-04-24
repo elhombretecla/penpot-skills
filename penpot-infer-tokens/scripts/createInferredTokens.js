@@ -1,114 +1,248 @@
 /**
  * createInferredTokens.js
  *
- * Phase 2 — Create global (primitive) and semantic tokens in the Penpot TokenCatalog.
- * Idempotent: skips tokens that already exist.
+ * Phase 2 — Write the approved Phase 1 plan back into the Penpot file.
  *
- * IMPORTANT: Replace GLOBAL_TOKENS and SEMANTIC_TOKENS with the approved token
- * plan from Phase 1 before running. Primitives MUST be created before semantics.
+ * This is what actually lands tokens in Penpot. It creates, in order:
+ *   1. Token Sets       (containers — tokens must live inside a set)
+ *   2. Tokens in sets   (primitives first, semantic second — ordering is meaningful)
+ *   3. Token Themes     (presets that activate specific sets)
  *
- * Usage: paste into two sequential execute_code calls:
- *   Call 1: run with mode = 'global'  → creates primitive tokens
- *   Call 2: run with mode = 'semantic' → creates semantic tokens
+ * Idempotent: skips sets, tokens, and themes that already exist.
  *
- * ⚠️  Verify TokenCatalog API shape with:
- *     penpot_api_info({ type: 'TokenCatalog' })
- *     penpot_api_info({ type: 'TokenData' })
+ * Replace `PLAN` with the Phase 1 structure the user approved, then run once via
+ * execute_code. Sets/themes can reference slash-grouped names (e.g. 'color/light'),
+ * which appear as folders in the Penpot Tokens panel.
+ *
+ * ── Verified Penpot Plugin API surface ──────────────────────────────────────
+ *   penpot.library.local.tokens              → TokenCatalog
+ *   catalog.sets: TokenSet[]                 (read)
+ *   catalog.themes: TokenTheme[]             (read)
+ *   catalog.addSet({ name }): TokenSet
+ *   catalog.addTheme({ group, name }): TokenTheme
+ *   set.tokens: Token[]
+ *   set.addToken({ type, name, value }): Token        (synchronous)
+ *   theme.activeSets: TokenSet[]
+ *   theme.addSet(set): void
+ *
+ *   TokenType ∈
+ *     "color" | "dimension" | "spacing" | "typography" | "shadow" | "opacity"
+ *     | "borderRadius" | "borderWidth"
+ *     | "fontWeights" | "fontSizes" | "fontFamilies"
+ *     | "letterSpacing" | "textDecoration" | "textCase"
+ *
+ *   NOTE: types are camelCase and plural where the API defines them that way
+ *   (fontSizes/fontWeights/fontFamilies). Do NOT use kebab-case — the API
+ *   rejects "border-radius", "font-size", etc.
+ *
+ *   Semantic tokens reference primitives via {token.name} expressions, e.g.
+ *     { type: 'color', name: 'color.bg.primary', value: '{color.white}' }
  */
 
-// ── REPLACE: fill in from approved Phase 1 plan ───────────────────────────
-const GLOBAL_TOKENS = [
-  // Colors (primitives)
-  { name: 'color.blue.500',  type: 'color',         value: '#3B82F6', description: 'Blue 500' },
-  { name: 'color.blue.700',  type: 'color',         value: '#1D4ED8', description: 'Blue 700' },
-  { name: 'color.gray.50',   type: 'color',         value: '#F9FAFB', description: 'Gray 50' },
-  { name: 'color.gray.900',  type: 'color',         value: '#111827', description: 'Gray 900' },
-  { name: 'color.white',     type: 'color',         value: '#FFFFFF', description: 'White' },
-  // Spacing
-  { name: 'spacing.xs',      type: 'spacing',       value: '4',  description: '4px' },
-  { name: 'spacing.sm',      type: 'spacing',       value: '8',  description: '8px' },
-  { name: 'spacing.md',      type: 'spacing',       value: '16', description: '16px' },
-  { name: 'spacing.lg',      type: 'spacing',       value: '24', description: '24px' },
-  { name: 'spacing.xl',      type: 'spacing',       value: '32', description: '32px' },
-  // Border radius
-  { name: 'radius.sm',       type: 'border-radius', value: '4',    description: '4px' },
-  { name: 'radius.md',       type: 'border-radius', value: '8',    description: '8px' },
-  { name: 'radius.full',     type: 'border-radius', value: '9999', description: 'Full pill' },
-  // Typography
-  { name: 'font.size.sm',    type: 'font-size',     value: '14', description: '14px' },
-  { name: 'font.size.base',  type: 'font-size',     value: '16', description: '16px — body base' },
-  { name: 'font.size.xl',    type: 'font-size',     value: '20', description: '20px' },
-  { name: 'font.weight.regular',  type: 'font-weight', value: '400', description: 'Regular' },
-  { name: 'font.weight.semibold', type: 'font-weight', value: '600', description: 'Semibold' },
-  { name: 'font.weight.bold',     type: 'font-weight', value: '700', description: 'Bold' },
-];
+const RUN_ID = 'infer-tokens-REPLACE-ME';
 
-const SEMANTIC_TOKENS = [
-  // Semantic colors (expressions referencing primitives)
-  { name: 'color.bg.primary',      type: 'color', value: '{color.white}',    description: 'Primary background' },
-  { name: 'color.bg.surface',      type: 'color', value: '{color.gray.50}',  description: 'Surface / card background' },
-  { name: 'color.text.primary',    type: 'color', value: '{color.gray.900}', description: 'Primary text' },
-  { name: 'color.brand.primary',   type: 'color', value: '{color.blue.500}', description: 'Brand primary — CTA, links' },
-  { name: 'color.brand.hover',     type: 'color', value: '{color.blue.700}', description: 'Brand hover state' },
-];
+// ── The approved token plan ──────────────────────────────────────────────────
+// `sets`   — ordered list of sets to create. Primitive sets first; semantic sets
+//            reference them via {…} expressions and must come after.
+// `themes` — presets. Each lists `activeSetNames` that will be attached to the
+//            theme (must match a name in `sets` above, or an already-existing set).
 
-const MODE = 'global';  // ← change to 'semantic' for the second call
-const RUN_ID = 'infer-tokens-REPLACE-ME'; // ← replace with actual run ID
+const PLAN = {
+  sets: [
+    {
+      name: 'primitives',
+      tokens: [
+        // Color primitives
+        { type: 'color', name: 'color.blue.500', value: '#3B82F6' },
+        { type: 'color', name: 'color.blue.700', value: '#1D4ED8' },
+        { type: 'color', name: 'color.gray.50',  value: '#F9FAFB' },
+        { type: 'color', name: 'color.gray.900', value: '#111827' },
+        { type: 'color', name: 'color.white',    value: '#FFFFFF' },
+
+        // Spacing
+        { type: 'spacing', name: 'spacing.xs', value: '4'  },
+        { type: 'spacing', name: 'spacing.sm', value: '8'  },
+        { type: 'spacing', name: 'spacing.md', value: '16' },
+        { type: 'spacing', name: 'spacing.lg', value: '24' },
+        { type: 'spacing', name: 'spacing.xl', value: '32' },
+
+        // Border radius (note: camelCase, not 'border-radius')
+        { type: 'borderRadius', name: 'radius.sm',   value: '4'    },
+        { type: 'borderRadius', name: 'radius.md',   value: '8'    },
+        { type: 'borderRadius', name: 'radius.full', value: '9999' },
+
+        // Font sizes (note: PLURAL — 'fontSizes', not 'font-size')
+        { type: 'fontSizes', name: 'font.size.sm',   value: '14' },
+        { type: 'fontSizes', name: 'font.size.base', value: '16' },
+        { type: 'fontSizes', name: 'font.size.xl',   value: '20' },
+
+        // Font weights (note: PLURAL — 'fontWeights')
+        { type: 'fontWeights', name: 'font.weight.regular',  value: '400' },
+        { type: 'fontWeights', name: 'font.weight.semibold', value: '600' },
+        { type: 'fontWeights', name: 'font.weight.bold',     value: '700' },
+      ],
+    },
+    {
+      name: 'color/light',
+      tokens: [
+        { type: 'color', name: 'color.bg.primary',    value: '{color.white}'    },
+        { type: 'color', name: 'color.bg.surface',    value: '{color.gray.50}'  },
+        { type: 'color', name: 'color.text.primary',  value: '{color.gray.900}' },
+        { type: 'color', name: 'color.brand.primary', value: '{color.blue.500}' },
+        { type: 'color', name: 'color.brand.hover',   value: '{color.blue.700}' },
+      ],
+    },
+    // Add color/dark, typography, shadow, etc. sets here from the approved plan.
+  ],
+
+  themes: [
+    // Each theme activates a subset of sets. Only one theme per group can be
+    // active at a time — use the `group` axis for light/dark, density, brand, etc.
+    { group: 'Mode', name: 'Light', activeSetNames: ['primitives', 'color/light'] },
+    // { group: 'Mode', name: 'Dark',  activeSetNames: ['primitives', 'color/dark'] },
+  ],
+};
 // ─────────────────────────────────────────────────────────────────────────────
 
-const tokensToCreate = MODE === 'global' ? GLOBAL_TOKENS : SEMANTIC_TOKENS;
-
-async function createTokenBatch(tokenDefs, runId) {
-  const catalog = penpot.library.local.tokens;
-  if (!catalog) {
-    return { error: 'TokenCatalog not available. Call penpot_api_info({ type: "LibraryLocal" }) to verify the tokens API path.' };
-  }
-
-  let existingTokens = [];
-  try {
-    existingTokens = typeof catalog === 'object' ? Object.values(catalog) : [];
-  } catch (e) {
-    return { error: 'Failed to read existing tokens: ' + e.message };
-  }
-
-  const existingByName = new Map(existingTokens.map(t => [t.name, t]));
-  const created = [];
-  const skipped = [];
-  const errors = [];
-
-  for (const def of tokenDefs) {
-    if (existingByName.has(def.name)) {
-      skipped.push({ name: def.name, id: existingByName.get(def.name).id });
-      continue;
-    }
-
-    try {
-      const token = await catalog.createToken({
-        name: def.name,
-        type: def.type,
-        value: String(def.value),
-        description: def.description || '',
-      });
-      created.push({ name: token.name, id: token.id, type: token.type, value: token.value });
-      existingByName.set(def.name, token);
-    } catch (e) {
-      errors.push({ name: def.name, error: e.message });
-    }
-  }
-
+const catalog = penpot.library.local.tokens;
+if (!catalog) {
   return {
-    runId,
-    mode: MODE,
-    created,
-    skipped,
-    errors,
-    summary: {
-      total: tokenDefs.length,
-      createdCount: created.length,
-      skippedCount: skipped.length,
-      errorCount: errors.length,
-    },
+    error: 'TokenCatalog not available at penpot.library.local.tokens. ' +
+           'Verify with penpot_api_info({ type: "Library" }) that this Penpot version exposes tokens.',
   };
 }
 
-return await createTokenBatch(tokensToCreate, RUN_ID);
+const existingSetsByName = new Map(catalog.sets.map(s => [s.name, s]));
+const existingThemesByKey = new Map(
+  catalog.themes.map(t => [t.group + '|' + t.name, t])
+);
+
+const setResults = [];
+const tokenResults = { created: [], skipped: [], errors: [] };
+const themeResults = [];
+
+// 1. Create / reuse sets and add their tokens
+for (const setDef of PLAN.sets) {
+  let set = existingSetsByName.get(setDef.name);
+  let setCreated = false;
+
+  if (!set) {
+    try {
+      set = catalog.addSet({ name: setDef.name });
+      existingSetsByName.set(setDef.name, set);
+      setCreated = true;
+    } catch (e) {
+      setResults.push({ name: setDef.name, error: 'addSet failed: ' + e.message });
+      continue;
+    }
+  }
+
+  const existingTokensByName = new Map(set.tokens.map(t => [t.name, t]));
+
+  for (const def of setDef.tokens) {
+    if (existingTokensByName.has(def.name)) {
+      tokenResults.skipped.push({ set: setDef.name, name: def.name });
+      continue;
+    }
+    try {
+      const token = set.addToken({
+        type: def.type,
+        name: def.name,
+        value: String(def.value),
+      });
+      existingTokensByName.set(def.name, token);
+      tokenResults.created.push({
+        set: setDef.name,
+        name: token.name,
+        type: token.type,
+        value: token.value,
+      });
+    } catch (e) {
+      tokenResults.errors.push({
+        set: setDef.name,
+        name: def.name,
+        type: def.type,
+        value: def.value,
+        error: e.message,
+      });
+    }
+  }
+
+  setResults.push({
+    name: setDef.name,
+    created: setCreated,
+    tokenCount: set.tokens.length,
+  });
+}
+
+// 2. Create / reuse themes and attach their active sets
+for (const themeDef of PLAN.themes) {
+  const key = themeDef.group + '|' + themeDef.name;
+  let theme = existingThemesByKey.get(key);
+  let themeCreated = false;
+
+  if (!theme) {
+    try {
+      theme = catalog.addTheme({ group: themeDef.group, name: themeDef.name });
+      existingThemesByKey.set(key, theme);
+      themeCreated = true;
+    } catch (e) {
+      themeResults.push({
+        group: themeDef.group,
+        name: themeDef.name,
+        error: 'addTheme failed: ' + e.message,
+      });
+      continue;
+    }
+  }
+
+  const alreadyActive = new Set(theme.activeSets.map(s => s.name));
+  const attached = [];
+  const missing = [];
+
+  for (const setName of themeDef.activeSetNames) {
+    if (alreadyActive.has(setName)) continue;
+    const targetSet = existingSetsByName.get(setName);
+    if (!targetSet) {
+      missing.push(setName);
+      continue;
+    }
+    try {
+      theme.addSet(targetSet);
+      attached.push(setName);
+    } catch (e) {
+      themeResults.push({
+        group: themeDef.group,
+        name: themeDef.name,
+        attachError: { setName, error: e.message },
+      });
+    }
+  }
+
+  themeResults.push({
+    group: themeDef.group,
+    name: themeDef.name,
+    created: themeCreated,
+    attachedSets: attached,
+    missingSets: missing,
+    totalActiveSets: theme.activeSets.length,
+  });
+}
+
+return {
+  runId: RUN_ID,
+  sets: setResults,
+  tokens: {
+    createdCount: tokenResults.created.length,
+    skippedCount: tokenResults.skipped.length,
+    errorCount: tokenResults.errors.length,
+    created: tokenResults.created,
+    errors: tokenResults.errors,
+  },
+  themes: themeResults,
+  summary: {
+    setsInCatalog: catalog.sets.length,
+    themesInCatalog: catalog.themes.length,
+    note: 'If any token type was rejected, verify it uses camelCase (borderRadius, fontSizes, fontWeights, fontFamilies, letterSpacing, textDecoration, textCase).',
+  },
+};

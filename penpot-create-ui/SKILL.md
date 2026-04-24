@@ -114,11 +114,15 @@ Phase 2: CORE COMPONENT CREATION (atoms first)
   ✋ USER CHECKPOINT per component: screenshot, await approval
 
 Phase 3: SCREEN ASSEMBLY
-  3a. Create screen wrapper frame (correct viewport: 1440px desktop or 390px mobile)
+  3a. Create screen wrapper frame with `addFlexLayout({ dir: 'column' })` (correct viewport: 1440px desktop or 390px mobile)
   3b. Build sections top-to-bottom, one execute_code call per section
-  3c. Use component instances throughout — never hardcode repeating UI
-  3d. Apply grid discipline (12-column or 4-column grid)
-  3e. Validate each section visually before proceeding
+  3c. For every frame that contains children: pick Flex or Grid per Section 5 heuristic before writing the code
+       — 1D flow (row or stack) → `addFlexLayout()`
+       — 2D alignment (equal columns and aligned rows) → `addGridLayout()`
+       — Name every frame by its semantic role (e.g. `section-hero`, `stats-grid`, `cta-group`)
+  3d. Use component instances throughout — never hardcode repeating UI
+  3e. Apply grid discipline (12-column or 4-column base grid) — all x positions align to columns, all gaps align to the 8px rhythm
+  3f. Validate each section visually before proceeding
   ✋ USER CHECKPOINT: full-screen screenshot, section-level screenshots
 
 Phase 4: DESIGN CRITIQUE (mandatory self-evaluation)
@@ -166,7 +170,92 @@ signals with less corporate formality."]
 
 ---
 
-## 5. Grid and Layout Architecture
+## 5. Layout Engine: Flex vs Grid (structural foundation)
+
+Every frame that contains other shapes MUST have a layout engine attached — either `addFlexLayout()` or `addGridLayout()`. Frames without a layout are a design smell: children drift when content changes and spacing becomes impossible to keep on the 8px rhythm.
+
+**Absolute positioning of structural children (`x`/`y` coordinates on a shape inside a content frame) is forbidden.** The only exception is decorative elements explicitly pulled out of flow (e.g. a floating badge), and only then the parent frame must still carry a layout.
+
+### The decision rule — one axis or two?
+
+Ask: *"Do the children need to align on one axis, or on two axes?"*
+
+- **One axis** → **Flex**. Children flow in a single direction. Alignment only matters along that direction; the cross-axis is "center", "start", or "stretch" as a whole.
+- **Two axes** → **Grid**. Children must align across both rows AND columns simultaneously (e.g., a stats grid where every card's top edge AND left edge line up with its neighbors).
+
+### Decision heuristic (use the first row that matches)
+
+| The structure is... | Engine | Why |
+|---|---|---|
+| A navbar (logo · links · actions) | Flex `row` | Single axis, `justify-content: space-between` |
+| A button (icon + label) | Flex `row` | Single axis |
+| A vertical stack (heading → body → CTA) | Flex `column` | Single axis |
+| A tag list / chip row / breadcrumb | Flex `row` + wrap | Single axis, overflow wraps |
+| A stats row with 3–4 equal cards | **Grid** `1 × N` | Cards must be identical width and align |
+| A feature grid (3×2, 4×3, etc.) | **Grid** `N × M` | Rows and columns both need alignment |
+| A pricing table (3 tiers side-by-side) | **Grid** `1 × 3` | Equal columns, rows aligned within cards |
+| A dashboard page (sidebar + main) | **Grid** `2 cols fixed+fluid` OR Flex `row` with fixed sidebar | Grid if rows of main content must align with sidebar sections; else Flex |
+| A form (labels + fields) | Flex `column` of rows, each row Flex `row` — OR Grid if labels must align across rows | Grid only if label column width is shared |
+| An image gallery / card catalog | **Grid** with `flex` tracks | Equal cells, wraps to new rows |
+| A card's internal layout | Flex `column` | Single vertical flow |
+| A section wrapper (hero, CTA, footer) | Flex `column` | Vertical stack of content blocks |
+| The screen wrapper itself | Flex `column` | Sections stack top-to-bottom |
+
+**Default**: when unsure between "Flex row + wrap" and "Grid", prefer Grid if all items must be equal width and align across rows. Use Flex + wrap only when items are intentionally different sizes.
+
+### Penpot layout APIs (quick reference)
+
+```typescript
+// FLEX — one-dimensional flow
+const layout = frame.addFlexLayout();
+layout.dir = 'row' | 'column';
+layout.alignItems = 'start' | 'center' | 'end' | 'stretch';
+layout.justifyContent = 'start' | 'center' | 'end' | 'space-between' | 'space-around';
+layout.flexWrap = 'wrap' | 'no-wrap';
+layout.gap = 16;                                    // or { rowGap, columnGap }
+layout.padding = { top: 24, right: 24, bottom: 24, left: 24 };
+
+// GRID — two-dimensional track-based
+const gridLayout = frame.addGridLayout();
+gridLayout.dir = 'row' | 'column';                  // row = row-major
+// Define tracks. Exact method names vary by Penpot version — verify with
+// penpot_api_info({ type: 'Frame' }) on the first use, then reuse the pattern.
+// Common shape: add tracks as ('flex'|'fixed'|'percent'|'auto', value)
+gridLayout.addColumn('flex', 1);                    // repeat N times for N equal columns
+gridLayout.addColumn('flex', 1);
+gridLayout.addColumn('flex', 1);
+gridLayout.addRow('auto');                          // rows expand to content
+gridLayout.rowGap = 24;
+gridLayout.columnGap = 24;
+gridLayout.padding = { top: 32, right: 32, bottom: 32, left: 32 };
+```
+
+> Before the first `addGridLayout()` call in a run, inspect the exact API surface with `penpot_api_info({ type: 'Frame' })` — method names (`addRow`, `addColumn`, `setRow`, etc.) have shifted across Penpot versions. After confirming once, reuse the confirmed pattern for the rest of the run.
+
+### Semantic frame naming (non-negotiable)
+
+Every frame you create must have a name that describes its **role**, not its appearance. This is what separates a designed file from a generated one in a handoff.
+
+**Section-level names** (direct children of the screen wrapper):
+- `section-hero`, `section-features`, `section-testimonials`, `section-pricing`, `section-cta`, `section-footer`
+- For app screens: `topbar`, `sidebar`, `main`, `page-header`, `content`, `tab-bar`
+
+**Structural groups** (named after their purpose):
+- `title-group` (eyebrow + heading + subheading), `cta-group` (button row), `nav-links`, `nav-actions`
+- `stats-grid`, `feature-grid`, `logo-strip`, `testimonial-list`
+- `form-fieldset`, `form-row`, `form-actions`
+
+**Component-level names**:
+- Use the component name: `Button`, `Input`, `Card/Metric`, `Card/Feature`
+- For instances, include the role: `cta-primary`, `cta-secondary`, `metric-mrr`, `metric-churn`
+
+**Never name frames** `Frame 123`, `Group 4`, `Rectangle`, `container-1`, `wrapper`, `box`. If you catch yourself typing `container`, stop and name it after what it contains.
+
+---
+
+## 6. Viewport, Columns & Spacing Rhythm
+
+The column grid in this section is a **visual alignment guide** (for horizontal positioning), not a layout engine. Actual frame composition uses the Flex and Grid engines from Section 5. The two work together: the engine places children; the column grid says where those children should land.
 
 ### Desktop Layout (1440px viewport)
 
@@ -209,7 +298,7 @@ Every horizontal position must align to the column grid. Every vertical spacing 
 
 ---
 
-## 6. Design Quality Criteria (Self-Evaluation Framework)
+## 7. Design Quality Criteria (Self-Evaluation Framework)
 
 Run these checks in Phase 4 after exporting screenshots. Score each 0–2 (0=fail, 1=partial, 2=pass).
 **Minimum passing score: 10/12.** If below 10, iterate.
@@ -259,7 +348,7 @@ Look at the exported screenshot for exactly 3 seconds.
 
 ---
 
-## 7. Component Quality Standards
+## 8. Component Quality Standards
 
 ### Button
 - Minimum height: 36px (small), 40px (medium), 44px (large)
@@ -298,7 +387,7 @@ Look at the exported screenshot for exactly 3 seconds.
 
 ---
 
-## 8. Content Realism
+## 9. Content Realism
 
 Never use "Lorem Ipsum". Never use "Title Here" or "Description text". Use **realistic, product-specific content**. This is not decoration — real content exposes layout problems that placeholder text hides.
 
@@ -312,7 +401,7 @@ The content should make the design feel alive and real, not like a wireframe wit
 
 ---
 
-## 9. Creative Variation Guidelines
+## 10. Creative Variation Guidelines
 
 Every UI should include at least **two design moments that signal creative intention**. These are not decoration — they are deliberate decisions that differentiate the product visually.
 
@@ -335,7 +424,7 @@ Every UI should include at least **two design moments that signal creative inten
 
 ---
 
-## 10. Critical Rules
+## 11. Critical Rules
 
 1. **Never use pure black (#000000) or pure white (#FFFFFF) for text or backgrounds** — use near-values from the token system.
 2. **Never use a shadow AND a border on the same element** — choose one depth signal.
@@ -347,10 +436,12 @@ Every UI should include at least **two design moments that signal creative inten
 8. **Always validate with export_shape after each section** — catching problems early is faster than fixing them in Phase 4.
 9. **Always return shape IDs** from every create call — they are needed to build on in the next call.
 10. **Never build on unvalidated work** — if a section looks wrong, fix it before building the next.
+11. **Every frame with children gets a layout engine** — `addFlexLayout()` for 1D flow, `addGridLayout()` for 2D alignment. No absolute-positioned structural children.
+12. **Name every frame semantically** — by role, not by appearance. `section-hero`, `stats-grid`, `cta-group` — never `Frame 4`, `container`, `box`.
 
 ---
 
-## 11. State Management
+## 12. State Management
 
 Write the design state to disk at each phase boundary:
 
@@ -390,7 +481,7 @@ Structure:
 
 ---
 
-## 12. Anti-Patterns (Design Crimes)
+## 13. Anti-Patterns (Design Crimes)
 
 **Visual:**
 - ❌ Icon on every nav item and every button (icon soup)
@@ -408,6 +499,10 @@ Structure:
 - ❌ More than 4 distinct type sizes on a single screen
 - ❌ Sections without clear hierarchy between them
 - ❌ A primary CTA that doesn't stand out visually
+- ❌ Frames containing children without `addFlexLayout()` or `addGridLayout()` — structural children positioned by absolute `x`/`y`
+- ❌ Using Flex-row-with-wrap to fake a grid of equal cards — if the cards must align across rows, use `addGridLayout()`
+- ❌ Using Grid for a simple 1D flow (navbar, button row, heading stack) — Flex is correct there
+- ❌ Generic frame names (`Frame 23`, `Group`, `container`, `wrapper`, `box`)
 
 **Process:**
 - ❌ Skipping Phase 0 and the Design Direction Card
@@ -418,7 +513,7 @@ Structure:
 
 ---
 
-## 13. Supporting Files
+## 14. Supporting Files
 
 ### References
 

@@ -82,22 +82,28 @@ for (const shape of shapes) {
     fontCombos.get(key).shapeIds.push(shape.id);
   }
 
-  // === SPACING (from flex layouts) ===
-  if (shape.layout) {
-    const addSpacing = (val, source) => {
-      if (!val || val === 0) return;
-      if (!spacings.has(val)) spacings.set(val, { count: 0, sources: [] });
-      spacings.get(val).count++;
-      spacings.get(val).sources.push({ shapeId: shape.id, source });
-    };
-    if (shape.layout.gap) addSpacing(shape.layout.gap, 'gap');
-    const p = shape.layout.padding;
-    if (p) {
-      addSpacing(p.top, 'padding-top');
-      addSpacing(p.right, 'padding-right');
-      addSpacing(p.bottom, 'padding-bottom');
-      addSpacing(p.left, 'padding-left');
-    }
+  // === SPACING (from flex / grid containers) ===
+  // The real Penpot API exposes layouts at shape.flex and shape.grid.
+  // There is no `shape.layout` property — using it returns undefined and
+  // silently produces an empty spacings inventory.
+  const addSpacing = (val, source) => {
+    if (!val || val === 0) return;
+    if (!spacings.has(val)) spacings.set(val, { count: 0, sources: [] });
+    spacings.get(val).count++;
+    spacings.get(val).sources.push({ shapeId: shape.id, source });
+  };
+
+  if (shape.flex) {
+    addSpacing(shape.flex.rowGap,        'flex.rowGap');
+    addSpacing(shape.flex.columnGap,     'flex.columnGap');
+    addSpacing(shape.flex.topPadding,    'flex.paddingTop');
+    addSpacing(shape.flex.rightPadding,  'flex.paddingRight');
+    addSpacing(shape.flex.bottomPadding, 'flex.paddingBottom');
+    addSpacing(shape.flex.leftPadding,   'flex.paddingLeft');
+  }
+  if (shape.grid) {
+    addSpacing(shape.grid.rowGap,    'grid.rowGap');
+    addSpacing(shape.grid.columnGap, 'grid.columnGap');
   }
 }
 
@@ -139,4 +145,4 @@ Then proceed to Phase 1 to map these raw values to a token taxonomy.
 - **No flex layouts found** (spacings = empty): The design may use fixed position layout. In this case, skip spacing token inference or ask the user to provide the spacing scale manually.
 - **No fills found**: Shapes may use strokes only. Proceed with stroke colors.
 - **No typography found**: All text may be inside components. Inspect component pages if available.
-- **TokenCatalog already has tokens**: Call `penpot_api_info` with type `TokenCatalog` to check if tokens already exist. If they do, map existing tokens to shapes (skip creation, go to Phase 3 application).
+- **TokenCatalog already has sets/tokens**: read `catalog.sets[].tokens[]` and `catalog.themes[]`. If a matching semantic set already exists, skip Phase 2 creation for those tokens (let the idempotency check in `createInferredTokens.js` handle it) and go straight to Phase 3 application for any shapes that aren't bound yet.

@@ -1,6 +1,11 @@
 # Phase 1: Token Inference — Naming and Taxonomy
 
-This phase runs entirely in Claude's context — no `execute_code` calls needed. Take the raw values from Phase 0 and map them to a W3C-compliant token taxonomy.
+This phase runs entirely in Claude's context — no `execute_code` calls needed. Take the raw values from Phase 0 and map them to a W3C-compliant token taxonomy **organised into Sets and Themes**, which is the structure Phase 2 will write into Penpot.
+
+A Phase 1 output is a `PLAN` object with three parts:
+1. **Sets** — the containers that hold tokens (primitives, color/light, color/dark, spacing, radius, typography…). Tokens can only exist inside a set.
+2. **Tokens** inside each set — primitives first (raw values), semantic tokens second (referencing primitives via `{…}` expressions).
+3. **Themes** — presets that activate specific sets together. At most one theme per group is active at a time (e.g. Mode: Light xor Dark; Density: Compact xor Comfortable).
 
 ---
 
@@ -148,6 +153,77 @@ Identify the base body font size (most common font size). Then assign the scale 
 
 ---
 
+## Penpot Token Types (use these exact strings)
+
+The Penpot Plugin API's `TokenType` is:
+
+```
+"color" | "dimension" | "spacing" | "typography" | "shadow" | "opacity"
+| "borderRadius" | "borderWidth"
+| "fontWeights" | "fontSizes" | "fontFamilies"
+| "letterSpacing" | "textDecoration" | "textCase"
+```
+
+**Critical**: types are **camelCase**, and plural where the API uses plurals. Using `'border-radius'`, `'font-size'`, or `'font-weight'` will cause `set.addToken(...)` to reject the token silently or error.
+
+| Inferred concept | TokenType string |
+|------------------|------------------|
+| Colors | `color` |
+| Spacing / gap / padding | `spacing` |
+| Width / height / sizing | `dimension` or `sizing` (`sizing` for layout children) |
+| Border radius | `borderRadius` |
+| Border / stroke width | `borderWidth` |
+| Font size (per token = one size) | `fontSizes` |
+| Font weight (per token = one weight) | `fontWeights` |
+| Font family | `fontFamilies` |
+| Letter spacing | `letterSpacing` |
+| Text decoration | `textDecoration` |
+| Text case | `textCase` |
+| Shadow | `shadow` |
+| Opacity | `opacity` |
+| Composite text style | `typography` |
+
+---
+
+## Canonical Set Architecture
+
+For most inferred systems, use this set layout:
+
+```
+primitives         (raw values only — color scales, raw spacing scale, raw radii, raw font-sizes/weights)
+color/light        (semantic color aliases for light theme — {color.white}, {color.gray.900}, …)
+color/dark         (semantic color aliases for dark theme — {color.gray.900}, {color.white}, …)
+spacing            (semantic spacing if different from primitive scale — otherwise skip)
+radius             (semantic radius if different — otherwise skip)
+typography         (typographic role tokens — heading/body/label, can be composite `typography` tokens)
+shadow             (if shadows exist)
+```
+
+Rules:
+- Slash-separated set names (`color/light`) appear as folders in the Penpot Tokens panel.
+- Primitives set is always active across all themes — it contains the raw atoms every semantic token refers to.
+- A semantic token's value is **always** a reference like `{color.blue.500}`, never a raw hex. That is the whole point — if the primitive changes, every semantic alias updates.
+
+---
+
+## Canonical Theme Architecture
+
+Themes are presets. Each theme has a `group` (the axis) and a `name` (the value on that axis). Only one theme per group can be active at a time.
+
+```
+Group "Mode"
+  Light   → activates: [primitives, color/light, spacing, radius, typography, shadow]
+  Dark    → activates: [primitives, color/dark,  spacing, radius, typography, shadow]
+
+Group "Density"  (optional — only if the design has density variants)
+  Compact     → activates: [spacing/compact]
+  Comfortable → activates: [spacing/comfortable]
+```
+
+If the inspected file has no dark variant, create only a single theme `Mode/Light` — the theme system is still useful for future expansion.
+
+---
+
 ## Presenting the Token Plan
 
 After inference, present the plan as a mapping table. Format:
@@ -187,12 +263,20 @@ Typography
 SEMANTIC TOKENS (aliases — applied to shapes)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+Set: color/light
   color.bg.primary       = {color.white}        → 31 shapes
   color.bg.surface       = {color.gray.50}       → 12 shapes
   color.text.primary     = {color.gray.900}      → 24 shapes
   color.brand.primary    = {color.blue.500}      → 18 shapes
   color.brand.hover      = {color.blue.700}      → 6 shapes
+
+THEMES
+━━━━━━
+
+  Mode / Light   → active sets: [primitives, color/light]
 ```
+
+After user approval, this structure is pasted into `scripts/createInferredTokens.js` as the `PLAN` constant.
 
 ---
 

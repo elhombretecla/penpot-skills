@@ -152,31 +152,156 @@ If a section feels empty with its content, the answer is almost never "add more 
 
 ---
 
+## Flex vs Grid — the decision framework
+
+Penpot exposes two layout engines on any frame: `addFlexLayout()` (1D, like CSS flexbox) and `addGridLayout()` (2D, like CSS grid). The choice is not cosmetic — it determines whether the design stays coherent when content grows, shrinks, or reflows.
+
+### The one question that decides it
+
+> **Do the children have to align on one axis, or on two axes?**
+
+- **One axis** → Flex. E.g. a navbar (`row`, align horizontally), a section wrapper (`column`, stack sections), a card's internals (`column`, stack content).
+- **Two axes** → Grid. E.g. a stats grid where each card's top edge *and* left edge must line up with its neighbors; a pricing table where the three tiers must share a common row baseline.
+
+### Concrete mapping
+
+| Structure | Engine | Shape |
+|-----------|--------|-------|
+| Screen wrapper (sections stack) | Flex | `column`, gap=0 or section-padding handled per section |
+| Section wrapper (eyebrow → heading → content → CTA) | Flex | `column`, `alignItems: 'center'` or `'start'` |
+| Navbar (logo · links · actions) | Flex | `row`, `justifyContent: 'space-between'` |
+| Tab bar, breadcrumb, tag list | Flex | `row`, optional `flexWrap: 'wrap'` |
+| Button internals (icon + label) | Flex | `row`, `alignItems: 'center'`, `justifyContent: 'center'` |
+| Card internals (title + body + footer) | Flex | `column`, consistent `gap` |
+| Sidebar + main content | Flex | `row`, fixed-width sidebar, fluid main — OR Grid if main rows must align to sidebar sections |
+| **Stats row** (3–4 equal metric cards) | **Grid** | 1 row × N equal `flex` columns |
+| **Feature grid** (e.g. 3×2 cards) | **Grid** | N equal columns × auto rows |
+| **Pricing tiers** (3 cards side-by-side) | **Grid** | 1 row × 3 equal columns |
+| **Image gallery / card catalog** | **Grid** | equal columns, auto rows — or `repeat(auto-fill, …)` pattern |
+| **Dashboard KPI board** | **Grid** | 2D — rows of metrics, cross-row alignment required |
+| Form (single column) | Flex column of rows | Each row Flex `row` (label + field) |
+| Form (label column aligned) | **Grid** | 2 cols: `auto` label + `flex 1` field, across all rows |
+
+### Rule of thumb
+
+> If you find yourself writing `flexWrap: 'wrap'` and every child has the same width, you are re-implementing Grid with Flex. Switch to `addGridLayout()`.
+
+---
+
 ## Grid Implementation in Penpot
 
-Create the grid as a frame, then build section frames inside it:
+Penpot's Grid Layout is track-based, like CSS Grid. The exact method names for adding tracks have shifted across Penpot versions — before the first `addGridLayout()` call in a run, verify the API with `penpot_api_info({ type: 'Frame' })` and match the shape below.
+
+### Pattern: equal-column grid (stats row, feature grid)
 
 ```typescript
-// Create 12-column grid frame
-const page = penpot.currentPage;
-const gridFrame = page.createFrame();
-gridFrame.name = 'screen-grid';
-gridFrame.x = 0;
-gridFrame.y = 0;
-gridFrame.width = 1440;
-gridFrame.height = 900; // will expand
+// Create the grid container
+const grid = page.createFrame();
+grid.name = 'stats-grid';
+grid.width = 1152;              // e.g. content width inside page padding
 
-// Add grid guide (Penpot grid API)
-// gridFrame.grids = [{ type: 'column', columns: 12, margin: 120, gutter: 24 }];
-// Note: verify grid API with penpot_api_info({ type: 'Frame' }) before using
+const gridLayout = grid.addGridLayout();
+gridLayout.dir = 'row';         // row-major (children fill left-to-right, then wrap)
 
-return { frameId: gridFrame.id };
+// Four equal-width columns
+gridLayout.addColumn('flex', 1);
+gridLayout.addColumn('flex', 1);
+gridLayout.addColumn('flex', 1);
+gridLayout.addColumn('flex', 1);
+
+// One auto-sized row that grows with content; Penpot will add more rows as needed
+gridLayout.addRow('auto');
+
+gridLayout.rowGap = 24;
+gridLayout.columnGap = 24;
+gridLayout.padding = { top: 0, right: 0, bottom: 0, left: 0 };
+
+// Then append children; they flow into the cells in order
+for (const metric of metrics) {
+  const card = buildMetricCard(metric);
+  grid.appendChild(card);
+}
 ```
+
+### Pattern: sidebar + main (fixed + fluid)
+
+```typescript
+const page = penpot.currentPage;
+const appShell = page.createFrame();
+appShell.name = 'app-shell';
+appShell.width = 1440;
+appShell.height = 900;
+
+const shellLayout = appShell.addGridLayout();
+shellLayout.dir = 'row';
+shellLayout.addColumn('fixed', 240);   // sidebar
+shellLayout.addColumn('flex', 1);      // main content fills the rest
+shellLayout.addRow('flex', 1);         // fills vertical space
+shellLayout.rowGap = 0;
+shellLayout.columnGap = 0;
+```
+
+### Pattern: form with aligned label column
+
+```typescript
+const form = page.createFrame();
+form.name = 'form-fieldset';
+form.width = 560;
+
+const formGrid = form.addGridLayout();
+formGrid.dir = 'row';
+formGrid.addColumn('auto');            // label column hugs its longest label
+formGrid.addColumn('flex', 1);         // field column fills
+formGrid.addRow('auto');
+formGrid.addRow('auto');
+formGrid.addRow('auto');
+formGrid.columnGap = 16;
+formGrid.rowGap = 20;
+```
+
+### Page-level column guide (still useful)
+
+The 12-column guide is still a visual overlay, separate from the layout engine. Add it to the screen wrapper for design reference:
+
+```typescript
+// Note: verify the exact guide/grid property with penpot_api_info({ type: 'Frame' })
+// Typical shape:
+// screen.grids = [{ type: 'column', columns: 12, margin: 120, gutter: 24 }];
+```
+
+Use this as a visual grid — the real layout still comes from `addFlexLayout` / `addGridLayout` on each frame.
+
+---
+
+## Semantic Frame Naming
+
+Every frame gets a name that describes its **role**. A designer opening the file should understand the structure from the layers panel alone.
+
+### Conventions
+
+- **Sections** (direct children of the screen wrapper): `section-hero`, `section-features`, `section-pricing`, `section-testimonials`, `section-cta`, `section-footer`
+- **App chrome**: `topbar`, `sidebar`, `page-header`, `main`, `content`, `tab-bar`, `toolbar`
+- **Grouped content**: `title-group` (eyebrow + heading + subheading), `cta-group`, `nav-links`, `nav-actions`, `logo-strip`, `social-proof`
+- **Layout containers by engine role**: `stats-grid`, `feature-grid`, `pricing-grid`, `testimonial-list`, `metric-card`, `feature-card`
+- **Forms**: `form-fieldset`, `form-row`, `form-actions`
+- **Instances**: append a role suffix — `cta-primary`, `cta-secondary`, `metric-mrr`, `metric-churn`
+
+### Forbidden names
+
+`Frame 4`, `Group 12`, `Rectangle`, `container`, `wrapper`, `box`, `div`, `inner`, `outer`. If you reach for one of these, the frame probably doesn't need to exist — or you haven't thought about what it represents.
+
+### A quick heuristic
+
+If the frame name doesn't map cleanly to an HTML element or ARIA landmark (`header`, `nav`, `main`, `section`, `article`, `aside`, `footer`, `form`, `fieldset`), consider whether the frame is structurally meaningful. If it isn't, flatten it.
 
 ---
 
 ## Composition Anti-Patterns
 
+- ❌ **Flex-row-with-wrap faking a grid** — if all children are the same width, use `addGridLayout()` with equal `flex` columns instead
+- ❌ **Grid used for a 1D flow** — a navbar, a button row, a vertical stack is Flex, not Grid
+- ❌ **Frames without a layout engine** — if a frame has children, it needs `addFlexLayout()` or `addGridLayout()`. Absolute positioning of structural children breaks as soon as content changes
+- ❌ **Generic frame names** (`Frame 1`, `container`, `wrapper`) — name by role, or flatten the frame
 - ❌ **Centered layout for dashboards** — dashboards need left-aligned sidebar+content, not centered
 - ❌ **Equal padding on all 4 sides for asymmetric layouts** — top ≠ bottom when there's visual hierarchy
 - ❌ **3 columns of equal weight for features** — consider 2+1 or 1+2 asymmetry, or 3 with the first card wider

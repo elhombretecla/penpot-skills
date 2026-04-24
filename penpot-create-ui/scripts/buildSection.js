@@ -11,13 +11,25 @@
  *   4. Customize fills, colors, and layout to match the Design Direction Card
  *
  * Available SECTION_TYPE presets:
- *   'navbar'       — Top navigation bar
- *   'hero'         — Landing page hero with headline + CTA
- *   'stats-row'    — Row of 4 metric cards (dashboard)
- *   'feature-grid' — 3-column feature cards
- *   'table-header' — Data table with column headers + 3 rows
- *   'sidebar'      — Left navigation sidebar
- *   'page-header'  — Dashboard page header (title + breadcrumb + actions)
+ *   'navbar'       — Top navigation bar (Flex row)
+ *   'hero'         — Landing page hero with headline + CTA (Flex column)
+ *   'stats-grid'   — 2D grid of metric cards, equal width, aligned rows (Grid)
+ *   'feature-grid' — Feature cards arranged in a grid, e.g. 3 cols × 2 rows (Grid)
+ *   'sidebar'      — Left navigation sidebar (Flex column)
+ *   'page-header'  — Dashboard page header: title + breadcrumb + actions (Flex row)
+ *
+ * LAYOUT ENGINE CHOICE (see SKILL.md Section 5 and references/03-layout-and-composition.md):
+ *   - 1D flow (a row, a stack)          → frame.addFlexLayout()
+ *   - 2D alignment (equal cells aligned
+ *     across rows AND columns)          → frame.addGridLayout()
+ *
+ * Before the first addGridLayout() call of the run, verify the exact
+ * Grid API shape with penpot_api_info({ type: 'Frame' }). Method names
+ * for adding tracks (addColumn/addRow vs. setColumn/setRow, etc.) vary
+ * across Penpot versions.
+ *
+ * NAMING: every frame gets a semantic role name. No 'Frame 1', 'container',
+ * 'wrapper', 'box'. Use 'section-hero', 'stats-grid', 'cta-group', etc.
  *
  * ⚠️  REPLACE ALL placeholder strings before running.
  * ⚠️  Validate with export_shape after each section call.
@@ -156,17 +168,20 @@ if (SECTION_TYPE === 'hero') {
   section.setSharedPluginData('create-ui', 'section', 'hero');
 }
 
-// ─── STATS ROW section ────────────────────────────────────────────────────────
-else if (SECTION_TYPE === 'stats-row') {
+// ─── STATS GRID section ───────────────────────────────────────────────────────
+// 2D alignment: N equal-width cards that must share top/left edges across rows.
+// This is a textbook Grid case — NOT a flex row.
+else if (SECTION_TYPE === 'stats-grid' || SECTION_TYPE === 'stats-row') {
+  // Outer section: Flex column (title-group + grid), 1D flow
   const section = page.createFrame();
   section.name = 'section-stats';
   section.width = wrapper.width;
   applyFill(section, 'color/bg/primary');
 
   const sectionLayout = section.addFlexLayout();
-  sectionLayout.dir = 'row';
+  sectionLayout.dir = 'column';
   sectionLayout.alignItems = 'stretch';
-  sectionLayout.padding = { top: 24, bottom: 0, left: 24, right: 24 };
+  sectionLayout.padding = { top: 24, bottom: 24, left: 24, right: 24 };
   sectionLayout.gap = 16;
 
   // ← REPLACE with real product metrics
@@ -177,14 +192,31 @@ else if (SECTION_TYPE === 'stats-row') {
     { label: 'Deployments Today', value: '342', change: '+23', positive: true },
   ];
 
+  // Inner grid: 2D — equal columns, rows flow as metrics are added
+  const grid = page.createFrame();
+  grid.name = 'stats-grid';
+  grid.fills = [{ fillType: 'solid', fillColor: '#FFFFFF', fillOpacity: 0 }];
+
+  const gridLayout = grid.addGridLayout();
+  gridLayout.dir = 'row';
+  // One flex column per metric; rows expand to content.
+  // Verify addColumn/addRow signatures with penpot_api_info on first use.
+  for (let i = 0; i < metrics.length; i++) {
+    gridLayout.addColumn('flex', 1);
+  }
+  gridLayout.addRow('auto');
+  gridLayout.rowGap = 16;
+  gridLayout.columnGap = 16;
+
   for (const metric of metrics) {
     const card = page.createFrame();
-    card.name = `card-${metric.label.toLowerCase().replace(/\s+/g, '-')}`;
+    card.name = `metric-${metric.label.toLowerCase().replace(/\s+/g, '-')}`;
     card.borderRadius = PROFILE === 'WARM' ? 16 : 8;
     applyFill(card, 'color/bg/primary');
     const borderC = getColor('color/border/default');
     if (borderC) card.strokes = [{ strokeType: 'inner', strokeColor: borderC.color, strokeOpacity: 1, strokeWidth: 1 }];
 
+    // Card internals: 1D vertical stack — Flex column
     const cardLayout = card.addFlexLayout();
     cardLayout.dir = 'column';
     cardLayout.alignItems = 'start';
@@ -203,14 +235,118 @@ else if (SECTION_TYPE === 'stats-row') {
     });
     card.appendChild(changeText);
 
-    section.appendChild(card);
+    grid.appendChild(card);
     createdIds.push(card.id);
   }
+
+  section.appendChild(grid);
+  createdIds.push(grid.id);
 
   wrapper.appendChild(section);
   createdIds.push(section.id);
   section.setSharedPluginData('create-ui', 'run_id', RUN_ID);
-  section.setSharedPluginData('create-ui', 'section', 'stats-row');
+  section.setSharedPluginData('create-ui', 'section', 'stats-grid');
+}
+
+// ─── FEATURE GRID section ─────────────────────────────────────────────────────
+// 2D alignment: equal-width feature cards that line up across rows.
+// Grid is the correct engine; Flex-row-with-wrap is a mis-translation here.
+else if (SECTION_TYPE === 'feature-grid') {
+  // Outer section: Flex column (title-group → grid), 1D vertical flow
+  const section = page.createFrame();
+  section.name = 'section-features';
+  section.width = wrapper.width;
+  applyFill(section, 'color/bg/primary');
+
+  const sectionLayout = section.addFlexLayout();
+  sectionLayout.dir = 'column';
+  sectionLayout.alignItems = 'center';
+  sectionLayout.padding = { top: 120, bottom: 120, left: 120, right: 120 };
+  sectionLayout.gap = 48;
+
+  // Title group — 1D vertical stack
+  const titleGroup = page.createFrame();
+  titleGroup.name = 'title-group';
+  titleGroup.fills = [{ fillType: 'solid', fillColor: '#FFFFFF', fillOpacity: 0 }];
+  const tgLayout = titleGroup.addFlexLayout();
+  tgLayout.dir = 'column';
+  tgLayout.alignItems = 'center';
+  tgLayout.gap = 12;
+
+  const eyebrow = createText('FEATURES', {
+    name: 'eyebrow', size: 11, weight: 600,
+    colorName: 'color/text/brand', lineHeight: 1.2,
+  });
+  titleGroup.appendChild(eyebrow);
+  const heading = createText('Everything you need to ship', {
+    name: 'heading', size: 40, weight: 700,
+    colorName: 'color/text/primary', lineHeight: 1.15,
+  });
+  titleGroup.appendChild(heading);
+  const sub = createText(
+    'Primitives that compose into whatever you need — without configuration, hidden complexity, or vendor lock-in.',
+    { name: 'subheading', size: 17, weight: 400, colorName: 'color/text/secondary', lineHeight: 1.6 }
+  );
+  titleGroup.appendChild(sub);
+  section.appendChild(titleGroup);
+  createdIds.push(titleGroup.id);
+
+  // ← REPLACE with real product features
+  const features = [
+    { title: 'Zero-config deploys', body: 'Push to main. That is the deploy. No YAML, no wizards, no surprises.' },
+    { title: 'Instant rollbacks', body: 'Every deploy is immutable. Roll back in a single click — no re-builds.' },
+    { title: 'Global edge network', body: 'Requests land on the nearest of 240 points of presence in under 50ms.' },
+    { title: 'Real-time observability', body: 'Logs, traces, and metrics in one timeline. Root-cause in minutes.' },
+    { title: 'Built-in previews', body: 'Every pull request gets a live URL. Review the product, not the diff.' },
+    { title: 'Typed configuration', body: 'Infrastructure as TypeScript. Autocomplete, refactors, CI checks.' },
+  ];
+
+  // Inner grid: 3 columns × auto rows
+  const COLS = 3;
+  const grid = page.createFrame();
+  grid.name = 'feature-grid';
+  grid.fills = [{ fillType: 'solid', fillColor: '#FFFFFF', fillOpacity: 0 }];
+
+  const gridLayout = grid.addGridLayout();
+  gridLayout.dir = 'row';
+  for (let i = 0; i < COLS; i++) {
+    gridLayout.addColumn('flex', 1);
+  }
+  const rowCount = Math.ceil(features.length / COLS);
+  for (let r = 0; r < rowCount; r++) {
+    gridLayout.addRow('auto');
+  }
+  gridLayout.rowGap = 32;
+  gridLayout.columnGap = 24;
+
+  for (const feature of features) {
+    // Feature card internals: 1D vertical stack
+    const card = page.createFrame();
+    card.name = `feature-${feature.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`;
+    card.fills = [{ fillType: 'solid', fillColor: '#FFFFFF', fillOpacity: 0 }];
+
+    const cardLayout = card.addFlexLayout();
+    cardLayout.dir = 'column';
+    cardLayout.alignItems = 'start';
+    cardLayout.padding = { top: 0, bottom: 0, left: 0, right: 0 };
+    cardLayout.gap = 8;
+
+    const title = createText(feature.title, { name: 'feature-title', size: 17, weight: 600, colorName: 'color/text/primary', lineHeight: 1.3 });
+    card.appendChild(title);
+    const body = createText(feature.body, { name: 'feature-body', size: 15, weight: 400, colorName: 'color/text/secondary', lineHeight: 1.6 });
+    card.appendChild(body);
+
+    grid.appendChild(card);
+    createdIds.push(card.id);
+  }
+
+  section.appendChild(grid);
+  createdIds.push(grid.id);
+
+  wrapper.appendChild(section);
+  createdIds.push(section.id);
+  section.setSharedPluginData('create-ui', 'run_id', RUN_ID);
+  section.setSharedPluginData('create-ui', 'section', 'feature-grid');
 }
 
 // ─── NAVBAR section ───────────────────────────────────────────────────────────
@@ -342,7 +478,7 @@ else if (SECTION_TYPE === 'page-header') {
 }
 
 else {
-  return { error: `Unknown SECTION_TYPE: ${SECTION_TYPE}. Valid: navbar, hero, stats-row, feature-grid, table-header, sidebar, page-header` };
+  return { error: `Unknown SECTION_TYPE: ${SECTION_TYPE}. Valid: navbar, hero, stats-grid, feature-grid, sidebar, page-header` };
 }
 
 return {

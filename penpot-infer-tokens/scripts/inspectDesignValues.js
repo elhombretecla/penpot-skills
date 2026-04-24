@@ -92,39 +92,67 @@ for (const shape of shapes) {
     }
   }
 
-  // ── Flex layout spacings ──────────────────────────────────────────────────
-  if (shape.layout) {
-    const addSpacing = (val, source) => {
-      if (!val || val === 0) return;
-      const v = Math.round(val);
-      if (!spacingMap.has(v)) spacingMap.set(v, { count: 0, sources: [] });
-      spacingMap.get(v).count++;
-      if (spacingMap.get(v).sources.length < 5) {
-        spacingMap.get(v).sources.push({ shapeId: shape.id, source });
-      }
-    };
-
-    if (shape.layout.gap) addSpacing(shape.layout.gap, 'gap');
-    const p = shape.layout.padding;
-    if (p) {
-      addSpacing(p.top, 'padding-top');
-      addSpacing(p.right, 'padding-right');
-      addSpacing(p.bottom, 'padding-bottom');
-      addSpacing(p.left, 'padding-left');
+  // ── Flex / Grid layout spacings ───────────────────────────────────────────
+  // Real Penpot API: shape.flex (FlexLayout) or shape.grid (GridLayout).
+  // There is no `shape.layout` property.
+  const addSpacing = (val, source) => {
+    if (!val || val === 0) return;
+    const v = Math.round(val);
+    if (!spacingMap.has(v)) spacingMap.set(v, { count: 0, sources: [] });
+    spacingMap.get(v).count++;
+    if (spacingMap.get(v).sources.length < 5) {
+      spacingMap.get(v).sources.push({ shapeId: shape.id, source });
     }
+  };
+
+  if (shape.flex) {
+    const f = shape.flex;
+    addSpacing(f.rowGap,        'flex.rowGap');
+    addSpacing(f.columnGap,     'flex.columnGap');
+    addSpacing(f.topPadding,    'flex.paddingTop');
+    addSpacing(f.rightPadding,  'flex.paddingRight');
+    addSpacing(f.bottomPadding, 'flex.paddingBottom');
+    addSpacing(f.leftPadding,   'flex.paddingLeft');
+  }
+  if (shape.grid) {
+    const g = shape.grid;
+    addSpacing(g.rowGap,    'grid.rowGap');
+    addSpacing(g.columnGap, 'grid.columnGap');
   }
 }
 
-// ── Check existing TokenCatalog ──────────────────────────────────────────────
+// ── Check existing TokenCatalog (sets, themes, tokens) ──────────────────────
+// Real API: catalog.sets[] and catalog.themes[]. There is no flat token list.
+let existingSets = [];
+let existingThemes = [];
 let existingTokens = [];
 try {
   const catalog = penpot.library.local.tokens;
   if (catalog) {
-    existingTokens = Object.values(catalog).map(t => ({
-      name: t.name,
-      type: t.type,
-      value: t.value,
+    existingSets = catalog.sets.map(s => ({
+      id: s.id,
+      name: s.name,
+      active: s.active,
+      tokenCount: s.tokens.length,
     }));
+    existingThemes = catalog.themes.map(t => ({
+      id: t.id,
+      group: t.group,
+      name: t.name,
+      active: t.active,
+      activeSetNames: t.activeSets.map(s => s.name),
+    }));
+    for (const s of catalog.sets) {
+      for (const tok of s.tokens) {
+        existingTokens.push({
+          set: s.name,
+          name: tok.name,
+          type: tok.type,
+          value: tok.value,
+          resolvedValue: tok.resolvedValue,
+        });
+      }
+    }
   }
 } catch (_) {}
 
@@ -148,6 +176,10 @@ return {
     .map(([value, v]) => ({ value, count: v.count }))
     .sort((a, b) => a.value - b.value),
   fonts: [...fontMap.values()].sort((a, b) => b.count - a.count),
+  existingSetCount: existingSets.length,
+  existingThemeCount: existingThemes.length,
   existingTokenCount: existingTokens.length,
+  existingSets,
+  existingThemes,
   existingTokens,
 };

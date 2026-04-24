@@ -44,17 +44,30 @@ Phase 1: INFERENCE (analysis — no writes)
   1c. Show a full mapping table: value → global token → semantic token → shapes affected
   ✋ USER CHECKPOINT: present full token plan, await explicit approval before any creation
 
-Phase 2: CREATION (writes begin)
-  2a. Create global (primitive) tokens first — raw values, type-correct
-  2b. Create semantic tokens second — expressions {token.name} referencing globals
-  2c. Validate: query TokenCatalog and confirm all tokens exist
-  ✋ USER CHECKPOINT: show token count summary, await approval before applying
+Phase 2: CREATION (writes begin — land the plan in the Penpot file)
+  In Penpot, tokens MUST live inside a Set. Themes are presets that activate
+  specific sets together. Phase 2 creates all three layers:
+  2a. Create Token SETS (e.g. `primitives`, `color/light`, `color/dark`,
+      `spacing`, `radius`, `typography`) via `catalog.addSet({ name })`
+  2b. Add PRIMITIVE tokens to their set(s) via `set.addToken({ type, name, value })`
+      — raw values, type-correct (camelCase: `borderRadius`, `fontSizes`, `fontWeights`)
+  2c. Add SEMANTIC tokens to their set(s) — expressions `{token.name}` referencing
+      primitives. Primitives must exist first or the expression breaks.
+  2d. Create THEMES via `catalog.addTheme({ group, name })` and attach active sets
+      with `theme.addSet(set)` (e.g. Mode/Light → primitives + color/light)
+  2e. Validate: query `catalog.sets` / `catalog.themes` and confirm everything exists
+  ✋ USER CHECKPOINT: show sets/tokens/themes counts, await approval before applying
 
 Phase 3: APPLICATION (bind tokens to shapes)
-  3a. For each shape with a fill matching a token value → apply the semantic token
-  3b. For each shape with a border radius → bind to radius token
-  3c. For each text node → bind font-size and font-weight tokens
-  3d. Validate: inspect a sample of shapes to confirm bindings
+  Use the native `shape.applyToken(token, properties)` binding — not the older
+  library-color `fillColorRefId` indirection. Token application is ASYNCHRONOUS
+  (effects settle after ~100ms).
+  3a. For each shape with a fill matching a token value → `applyToken(t, ['fill'])`
+  3b. For each shape with a stroke matching a token value → `applyToken(t, ['strokeColor'])`
+  3c. For each shape with a border radius → `applyToken(t, ['all'])`
+  3d. For each text node → `applyToken(t, ['fontSize'])` and `['fontWeight']`
+  3e. For each flex/grid container → bind gap and padding spacing tokens
+  3f. Validate: inspect a sample via `shape.tokens` to confirm bindings
   ✋ USER CHECKPOINT: show export_shape screenshot + binding summary, sign-off
 ```
 
@@ -70,6 +83,65 @@ Phase 3: APPLICATION (bind tokens to shapes)
 | `export_shape` | Export shape/frame as image for visual validation. |
 
 > MCP always operates on the **currently focused page**. Explicitly read `penpot.currentPage` at the start of every call.
+
+---
+
+## 3b. Penpot Design Tokens API (verified surface)
+
+This skill writes directly to Penpot's Design Tokens system. Memorise this surface — it is the source of truth for what lands in the file.
+
+```typescript
+// Catalog = the entire token system for the local library
+const catalog = penpot.library.local.tokens;   // TokenCatalog
+
+catalog.sets:    TokenSet[]                    // read
+catalog.themes:  TokenTheme[]                  // read
+catalog.addSet({ name }): TokenSet             // create a new set
+catalog.addTheme({ group, name }): TokenTheme  // create a new theme
+
+// Sets = token containers. Tokens only exist inside a set.
+set.name:    string
+set.active:  boolean                           // toggleActive() to flip
+set.tokens:  Token[]
+set.addToken({ type, name, value }): Token     // synchronous
+
+// Themes = presets that activate specific sets. Only one theme per group active.
+theme.group:       string
+theme.name:        string
+theme.active:      boolean                     // toggleActive()
+theme.activeSets:  TokenSet[]
+theme.addSet(set): void                        // attach a set to this theme
+theme.removeSet(set): void
+
+// Token types (camelCase, plural where the API uses plurals):
+//   "color" | "dimension" | "spacing" | "typography" | "shadow" | "opacity"
+//   | "borderRadius" | "borderWidth"
+//   | "fontWeights" | "fontSizes" | "fontFamilies"
+//   | "letterSpacing" | "textDecoration" | "textCase"
+//
+// Token values are strings:
+//   "#3B82F6"          (direct value)
+//   "16"               (numeric value — still a string)
+//   "{color.white}"    (reference to another token in any active set)
+
+// Binding a token to a shape
+shape.applyToken(token, ["fill"]);             // ASYNC — ~100ms to settle
+token.applyToShapes([shape1, shape2], ["fill"]);
+
+// Discovery helpers
+penpotUtils.tokenOverview();                   // { setName: { type: [tokenName, ...] } }
+penpotUtils.findTokenByName(name);             // returns first match or null
+penpotUtils.findTokensByName(name);            // all matches across sets
+penpotUtils.getTokenSet(token);                // the set that contains a token
+```
+
+**Common pitfalls** (the ones that silently break "creation"):
+- ❌ `catalog.createToken(...)` — this method does not exist. Tokens are added to **sets**.
+- ❌ `'border-radius'`, `'font-size'`, `'font-weight'` — wrong. Use camelCase + plural: `'borderRadius'`, `'fontSizes'`, `'fontWeights'`.
+- ❌ Passing `description` to `addToken` — not part of the signature; silently ignored or rejected depending on version.
+- ❌ Creating tokens without any sets — they have nowhere to live.
+- ❌ Using `shape.layout.gap` — not a real property. Use `shape.flex.rowGap` / `shape.flex.columnGap` / `shape.flex.topPadding`, etc., or `shape.grid.rowGap`.
+- ❌ `Object.values(catalog)` to enumerate tokens — iterate `catalog.sets[].tokens[]` instead.
 
 ---
 
@@ -224,33 +296,47 @@ semantic set:
 
 ## 7. Token Application Rules
 
-When binding tokens to shapes:
+Use the native Penpot token binding API:
 
 ```typescript
-// Apply a fill using library color (token-bound fill)
-const bgColor = penpot.library.local.colors.find(c => c.name === 'color/bg/primary');
-if (bgColor) {
-  shape.fills = [{
-    fillType: 'solid',
-    fillColor: bgColor.color,
-    fillOpacity: bgColor.opacity ?? 1,
-    fillColorRefId: bgColor.id,
-    fillColorRefFileId: bgColor.fileId,
-  }];
-}
+// Apply a semantic color token to a shape's fill
+const token = penpotUtils.findTokenByName('color.bg.primary');
+if (token) shape.applyToken(token, ['fill']);
+
+// Border radius — 'all' covers all 4 corners
+shape.applyToken(radiusToken, ['all']);
+
+// Text node — bind fontSize and fontWeight separately
+textShape.applyToken(fontSizeToken, ['fontSize']);
+textShape.applyToken(fontWeightToken, ['fontWeight']);
+
+// Flex / Grid container spacing
+container.applyToken(spacingToken, ['rowGap']);
+container.applyToken(spacingToken, ['paddingTop']);
 ```
 
-**Application priority order** (apply semantic tokens, not primitives):
-1. Fill colors → bind to semantic color tokens
-2. Stroke colors → bind to semantic color tokens
-3. Border radius → bind to radius tokens
-4. Font size → bind to font.size tokens (on text nodes)
-5. Gap/padding in flex layouts → bind to spacing tokens
+**TokenProperty cheat sheet** (strings passed to `applyToken`):
+- Color: `"fill"`, `"strokeColor"`
+- Border radius: `"all"` (or individual corners: `borderRadiusTopLeft`, `borderRadiusTopRight`, `borderRadiusBottomRight`, `borderRadiusBottomLeft`)
+- Text: `"fontSize"`, `"fontWeight"`, `"fontFamilies"`, `"letterSpacing"`, `"textCase"`, `"textDecoration"`
+- Spacing: `"rowGap"`, `"columnGap"`, `"paddingLeft"`, `"paddingTop"`, `"paddingRight"`, `"paddingBottom"`, `"marginLeft/Top/Right/Bottom"`
+- Sizing: `"width"`, `"height"`, `"x"`, `"y"`, `"strokeWidth"`, `"opacity"`, `"rotation"`
+- Shadow: `"shadow"`
+- Typography (composite): `"typography"`
 
-**Do NOT**:
-- Bind primitive tokens directly to shapes — only semantic tokens
-- Apply tokens to shapes that already have token bindings (check `fillColorRefId` first)
-- Modify shapes outside the current page scope
+**Application priority order** (apply semantic tokens, not primitives):
+1. Fill colors → `applyToken(t, ['fill'])`
+2. Stroke colors → `applyToken(t, ['strokeColor'])`
+3. Border radius → `applyToken(t, ['all'])`
+4. Text `fontSize` / `fontWeight` (text nodes only)
+5. Gap/padding in `shape.flex` / `shape.grid` containers
+
+**Important notes**:
+- Application is **asynchronous** — resolved values settle after ~100ms. Re-inspect to verify.
+- `shape.tokens` returns a `{ [propertyName]: "token.name" }` map of current bindings.
+- Skip `shape.isMainComponent` shapes — component main shapes cannot be mutated via the Plugin API in MCP context.
+- Apply **semantic** tokens (`color.bg.primary`), never primitives (`color.blue.500`), to shapes.
+- To remove a token binding, set the raw property directly (e.g. `shape.fills = [...]`).
 
 ---
 
@@ -258,12 +344,16 @@ if (bgColor) {
 
 1. **Inspect first, infer second, create third, apply last** — never skip phases.
 2. **Always propose the full token plan before creating** — user must approve the naming.
-3. **Primitives before semantics** — semantic tokens use `{expression}` syntax referencing primitives. Create primitives first or expressions will fail.
-4. **One token per unique visual role** — if two shapes have the same hex but different semantic roles (one is bg, one is a brand color), create two semantic tokens pointing to the same primitive.
-5. **Idempotency** — check if a token already exists before creating. Skip if it does.
-6. **Never parallelize `execute_code` calls** — Penpot state mutations must be strictly sequential.
-7. **Validate after each batch** — query the TokenCatalog after creating tokens to confirm they exist.
-8. **Return IDs** from every `execute_code` call — track them in the state ledger.
+3. **Sets before tokens** — tokens can only be added to a set. Create the set with `catalog.addSet({ name })` first, then `set.addToken(...)`.
+4. **Primitives before semantics** — semantic tokens use `{expression}` syntax referencing primitives. Create primitives first or expressions will fail.
+5. **Themes last** — themes reference existing sets via `theme.addSet(set)`. Create the sets before attaching them to a theme.
+6. **Correct token types** — use camelCase, plural where the API uses plurals: `borderRadius`, `fontSizes`, `fontWeights`, `fontFamilies`, `letterSpacing`, `textDecoration`, `textCase`. Never kebab-case.
+7. **One token per unique visual role** — if two shapes have the same hex but different semantic roles (one is bg, one is a brand color), create two semantic tokens pointing to the same primitive.
+8. **Idempotency** — check if a set / token / theme already exists before creating. Skip if it does.
+9. **Never parallelize `execute_code` calls** — Penpot state mutations must be strictly sequential.
+10. **Validate after each batch** — read `catalog.sets[]` / `catalog.themes[]` after creation to confirm everything exists. Export a bound shape after application to visually confirm.
+11. **Return IDs** from every `execute_code` call — track them in the state ledger.
+12. **Token binding is async** — `shape.applyToken(...)` settles after ~100ms. Do not immediately read the resolved value in the same call.
 
 ---
 
@@ -287,14 +377,18 @@ Structure:
     "spacings": [8, 16, 24],
     "fonts": [{ "fontFamily": "Inter", "fontSize": 16, "fontWeight": 400 }]
   },
-  "proposedTokens": {
-    "global": [...],
-    "semantic": [...]
+  "plan": {
+    "sets": [
+      { "name": "primitives",  "tokens": [ /* { type, name, value } */ ] },
+      { "name": "color/light", "tokens": [ /* semantic tokens */ ] }
+    ],
+    "themes": [
+      { "group": "Mode", "name": "Light", "activeSetNames": ["primitives", "color/light"] }
+    ]
   },
-  "createdTokenIds": {
-    "color.blue.500": "token-id-...",
-    "color.bg.primary": "token-id-..."
-  },
+  "createdSetIds":   { "primitives": "set-id-...", "color/light": "set-id-..." },
+  "createdTokenIds": { "color.blue.500": "token-id-...", "color.bg.primary": "token-id-..." },
+  "createdThemeIds": { "Mode/Light": "theme-id-..." },
   "appliedShapeIds": ["shape-id-..."],
   "completedPhases": ["phase0", "phase1"]
 }
@@ -305,9 +399,15 @@ Structure:
 ## 10. Anti-Patterns
 
 - ❌ Creating tokens without user approval of the naming plan
+- ❌ Calling `catalog.createToken(...)` — not an API. Use `catalog.addSet(...)` then `set.addToken(...)`
+- ❌ Creating tokens without first creating a Set — tokens have nowhere to live
+- ❌ Using kebab-case token types (`'border-radius'`, `'font-size'`) — the API rejects them. Use `'borderRadius'`, `'fontSizes'`, `'fontWeights'`, `'fontFamilies'`.
+- ❌ Skipping themes — without themes, users can't switch between light/dark or brand variants. Themes are how the token system is navigated in the UI.
 - ❌ Applying primitive tokens directly to shapes (always use semantic tokens)
 - ❌ Creating semantic tokens before the primitives they reference
 - ❌ Hardcoding values in semantic tokens instead of using `{expression}` syntax
+- ❌ Using `shape.layout.gap` / `shape.layout.padding` during inspection — not real properties. Use `shape.flex.rowGap` / `shape.flex.topPadding` etc., or `shape.grid.*`.
+- ❌ Using `fillColorRefId` indirection for token binding — the canonical API is `shape.applyToken(token, ['fill'])`
 - ❌ Skipping idempotency checks (re-running creates duplicates)
 - ❌ Renaming existing tokens that shapes are already bound to (silently breaks bindings)
 - ❌ Inferring tokens from only one layer — always traverse the full shape tree
@@ -330,7 +430,9 @@ Structure:
 
 | Script | Use for |
 |--------|---------|
-| `scripts/inspectDesignValues.js` | Phase 0 — extract all unique visual values from the page |
-| `scripts/inferTokenTaxonomy.js` | Phase 1 — cluster values and propose token names (runs locally, no Penpot call) |
-| `scripts/createInferredTokens.js` | Phase 2 — create global + semantic tokens idempotently |
-| `scripts/applyTokensToShapes.js` | Phase 3 — bind semantic tokens to matching shapes |
+| `scripts/inspectDesignValues.js` | Phase 0 — extract all unique visual values + existing sets/themes/tokens from the page |
+| `scripts/createInferredTokens.js` | Phase 2 — idempotently create Sets, add Tokens (primitives + semantic), and create Themes with active-set attachments |
+| `scripts/applyTokensToShapes.js` | Phase 3 — bind semantic tokens to matching shapes via `shape.applyToken(token, properties)` |
+
+> Phase 1 (inference / naming) runs entirely in Claude's context — no script needed.
+> It produces the `PLAN` structure that gets pasted into `createInferredTokens.js`.
